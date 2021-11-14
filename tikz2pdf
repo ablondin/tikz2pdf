@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+r"""A script to convert TikZ files to PDF"""
+
+# pylint: disable=too-many-instance-attributes,invalid-name,broad-except
 
 import os
 import re
@@ -11,7 +14,8 @@ import subprocess
 from time import sleep
 from tempfile import mkdtemp
 
-class TikZ2PDF(object):
+class TikZ2PDF:
+    r"""A TikZ to PDF converter"""
 
     def __init__(self, tikz_file, pdf_filename, **command_line_arguments):
 
@@ -28,7 +32,7 @@ class TikZ2PDF(object):
 
         self.tikz_file = tikz_file
         self.pdf_filename = pdf_filename
-        self.tikz_filename = os.path.abspath(tikz_file.name) 
+        self.tikz_filename = os.path.abspath(tikz_file.name)
         self.tikz_dir = os.path.abspath(os.path.dirname(tikz_file.name))
         self.work_dir = mkdtemp(prefix='tikz2pdf-')
         self.template_dir = None
@@ -59,8 +63,11 @@ class TikZ2PDF(object):
         except KeyError:
             pass
 
+        self.parser = None
+
 
     def wait_for_changes(self):
+        r"""Wait for changes of source file to regenerate it"""
         self.log.info("Waiting for changes...")
         while True:
             current_mtimes = self.get_mtimes()
@@ -71,6 +78,7 @@ class TikZ2PDF(object):
 
 
     def get_mtimes(self):
+        r"""Return the m times of monitored files"""
         files = [self.tikz_filename]
         if self.arguments.get('template', None):
             files.append(os.path.abspath(self.arguments['template'].name))
@@ -79,6 +87,7 @@ class TikZ2PDF(object):
 
 
     def process(self, **command_line_arguments):
+        r"""Process the TikZ file according to the command line arguments"""
         self.arguments = self.get_arguments(**command_line_arguments)
         for k,v in self.arguments.iteritems():
             self.log.debug("Parameter '%s' is set to '%s'", k, v)
@@ -100,19 +109,23 @@ class TikZ2PDF(object):
 
 
     def set_texinputs(self):
-        """Add the directories of the tikz file and template to the TEXINPUTS environment variable"""
+        """Add the directories of the tikz file and template to the TEXINPUTS
+        environment variable"""
         new_texinputs = self.existing_texinputs.split(':')
         new_texinputs.append(os.getcwd())
         new_texinputs.append(self.tikz_dir)
         if self.template_dir:
             new_texinputs.append(self.template_dir)
         new_texinputs.append('.')
-        new_texinputs.extend([os.path.abspath(os.path.expanduser(x)) for x in self.arguments.get('include_directory', [])])
+        new_texinputs.extend([
+            os.path.abspath(os.path.expanduser(x))
+            for x in self.arguments.get('include_directory', [])])
         self.environ['TEXINPUTS'] = os.pathsep.join(new_texinputs)
         self.log.debug("$TEXINPUTS is set to '%s'", self.environ['TEXINPUTS'])
 
 
     def get_template(self):
+        r"""Get the template to use"""
         if self.arguments.get('template', None):
             template_filename = self.arguments['template'].name
             self.template_dir = os.path.abspath(os.path.dirname(template_filename))
@@ -125,8 +138,7 @@ class TikZ2PDF(object):
             except ValueError:
                 self.log.error("Error: Template does not contain '%tikz2pdf-tikz'")
                 shutil.rmtree(self.work_dir)
-                exit(1)
-        
+                sys.exit(1)
         else:
             template_tex = r"""\documentclass{article}
 \usepackage{tikz}
@@ -143,43 +155,62 @@ class TikZ2PDF(object):
 
 
     def get_tikz(self):
+        r"""Return the TikZ string"""
         self.tikz_file.close()
         self.tikz_file = open(self.tikz_filename, 'rb')
         return self.tikz_file.read()
 
 
     def compile(self):
+        r"""Compile the TikZ string"""
         for i in range(self.arguments['number']):
             self.log.info("Compiling (%d/%d) ...", i+1, self.arguments['number'])
             if self.arguments['quiet']:
-                p = subprocess.Popen([self.arguments['bin'], '-halt-on-error', 'final.tex'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=self.work_dir, env=self.environ)
+                p = subprocess.Popen(
+                        [self.arguments['bin'], '-halt-on-error', 'final.tex'],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        cwd=self.work_dir,
+                        env=self.environ)
             else:
-                p = subprocess.Popen([self.arguments['bin'], '-halt-on-error', 'final.tex'], cwd=self.work_dir, env=self.environ)
+                p = subprocess.Popen(
+                        [self.arguments['bin'], '-halt-on-error', 'final.tex'],
+                        cwd=self.work_dir,
+                        env=self.environ)
             return_code = p.wait()
             if return_code:
-                self.log.error("Error: %s failed to compile. Last 10 lines of output:", self.arguments['bin'])
-                print
+                self.log.error(
+                    "Error: %s failed to compile. Last 10 lines of output:",
+                    self.arguments['bin'])
+                print()
                 try:
-                    print '\n'.join(p.communicate()[0].split('\n')[-10:])
-                except:
-                    pass
+                    print('\n'.join(p.communicate()[0].split('\n')[-10:]))
+                except BaseException as exception:
+                    print('An exception occurred: {}'.format(exception))
                 return
 
         # Copy final PDF
-        subprocess.call(['cp', os.path.join(self.work_dir, 'final.pdf'), self.pdf_filename])
+        subprocess.call(
+            ['cp', os.path.join(self.work_dir, 'final.pdf'), self.pdf_filename])
         self.log.info("Figure written on %s", self.pdf_filename)
 
-    
     def get_arguments(self, **command_line_arguments):
+        r"""Retrieve command line arguments"""
         # Custom argument parser
         parser = argparse.ArgumentParser(argument_default=argparse.SUPPRESS)
         parser.add_argument('--bin', type=str)
         parser.add_argument('--include-directory', action='append')
         parser.add_argument('--number', type=int)
         parser.add_argument('--output', type=str)
-        parser.add_argument('--template', type=argparse.FileType('rb')) 
-        parser.add_argument('--xelatex', action='store_const', const='xelatex', dest='bin')
-        parser.add_argument('--pdflatex', action='store_const', const='pdflatex', dest='bin')
+        parser.add_argument('--template', type=argparse.FileType('rb'))
+        parser.add_argument('--xelatex',
+            action='store_const',
+            const='xelatex',
+            dest='bin')
+        parser.add_argument('--pdflatex',
+            action='store_const',
+            const='pdflatex',
+            dest='bin')
         parser.add_argument('--preview', action='store_true')
         self.parser = parser
 
@@ -209,7 +240,10 @@ class TikZ2PDF(object):
 
 
     def read_arguments_from_file(self, f):
-        self.log.debug("Reading parameters from file %s", os.path.abspath(f.name))
+        r"""Read arguments from a file"""
+        self.log.debug(
+            "Reading parameters from file %s",
+            os.path.abspath(f.name))
         arguments = []
         for line in f:
             match = re.search(self.argument_pattern, line)
@@ -220,7 +254,8 @@ class TikZ2PDF(object):
                     if arg == 'template':
                         value = os.path.expanduser(value)
                         if not os.path.isabs(value):
-                            value = os.path.join(os.path.dirname(tikz_file.name), value)
+                            value = os.path.join(
+                                os.path.dirname(self.tikz_file.name), value)
                         arguments.append(value)
                     else:
                         arguments.extend(value.split())
@@ -228,34 +263,89 @@ class TikZ2PDF(object):
 
 
     def open_tikz_editor(self):
+        r"""Open a text editor with respect to the EDITOR environment variable"""
         self.log.info("Opening TikZ editor...")
-        subprocess.Popen([self.environ['EDITOR'], self.tikz_filename], stdout=subprocess.PIPE)
+        subprocess.Popen(
+            [self.environ['EDITOR'], self.tikz_filename],
+            stdout=subprocess.PIPE)
 
 
     def open_pdf_viewer(self):
+        r"""Open the PDF viewer with respect to the current platform"""
         self.log.info("Opening PDF viewer...")
         if sys.platform == 'linux2':
-            subprocess.Popen(["xdg-open", self.pdf_filename], stdout=subprocess.PIPE)
+            subprocess.Popen(
+                ["xdg-open", self.pdf_filename],
+                stdout=subprocess.PIPE)
         elif sys.platform == 'darwin':
-            subprocess.Popen(["open", self.pdf_filename], stdout=subprocess.PIPE)
+            subprocess.Popen(
+                ["open", self.pdf_filename],
+                stdout=subprocess.PIPE)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="tikz2pdf - compile TikZ to PDF", argument_default=argparse.SUPPRESS)
-    parser.add_argument('tikz_files', nargs='*', type=argparse.FileType('rb'), default=sys.stdin, help="TikZ file(s)", metavar="TIKZ")
-    parser.add_argument('-b', '--bin', type=str, help="binary to use for compiling (default: pdflatex)")
-    parser.add_argument('-d', '--debug', action='store_true', default=False, help="print debug information")
-    parser.add_argument('-e', '--edit', action='store_true', default=False, help="open TikZ file in default editor")
-    parser.add_argument('-i', '--interactive', action='store_true', default=False, help="start interactive session (same as -evw)")
-    parser.add_argument('-c', '--include-dir', action='append', help="additional directory to add to TEXINPUTS")
-    parser.add_argument('-n', '--number', type=int, help="number of iterations to compile (default: 1)", metavar="N")
-    parser.add_argument('-o', '--output', nargs='*', type=str, help="output PDF file or directory (with trailing slash)", metavar="PDF")
-    parser.add_argument('-p', '--pdflatex', action='store_const', const='pdflatex', dest='bin', help="use pdflatex as compiler")
-    parser.add_argument('-q', '--quiet', action='store_true', default=False, help="suppress compiler output")
-    parser.add_argument('-t', '--template', type=argparse.FileType('rb'), help="LaTeX file to use as template", metavar="TEX") 
-    parser.add_argument('-v', '--view', action='store_true', default=False, help="open PDF file in default viewer")
-    parser.add_argument('-w', '--watch', action='store_true', default=False, help="recompile when TikZ file or template has changed")
-    parser.add_argument('-x', '--xelatex', action='store_const', const='xelatex', dest='bin', help="use xelatex as compiler")
+    r"""Main function"""
+    parser = argparse.ArgumentParser(
+        description="tikz2pdf - compile TikZ to PDF",
+        argument_default=argparse.SUPPRESS)
+    parser.add_argument('tikz_files',
+        nargs='*',
+        type=argparse.FileType('rb'),
+        default=sys.stdin,
+        help="TikZ file(s)",
+        metavar="TIKZ")
+    parser.add_argument('-b', '--bin',
+        type=str,
+        help="binary to use for compiling (default: pdflatex)")
+    parser.add_argument('-d', '--debug',
+        action='store_true',
+        default=False,
+        help="print debug information")
+    parser.add_argument('-e', '--edit',
+        action='store_true',
+        default=False,
+        help="open TikZ file in default editor")
+    parser.add_argument('-i', '--interactive',
+        action='store_true',
+        default=False,
+        help="start interactive session (same as -evw)")
+    parser.add_argument('-c', '--include-dir',
+        action='append',
+        help="additional directory to add to TEXINPUTS")
+    parser.add_argument('-n', '--number',
+        type=int, help="number of iterations to compile (default: 1)",
+        metavar="N")
+    parser.add_argument('-o', '--output',
+        nargs='*',
+        type=str,
+        help="output PDF file or directory (with trailing slash)",
+        metavar="PDF")
+    parser.add_argument('-p', '--pdflatex',
+        action='store_const',
+        const='pdflatex',
+        dest='bin',
+        help="use pdflatex as compiler")
+    parser.add_argument('-q', '--quiet',
+        action='store_true',
+        default=False,
+        help="suppress compiler output")
+    parser.add_argument('-t', '--template',
+        type=argparse.FileType('rb'),
+        help="LaTeX file to use as template",
+        metavar="TEX")
+    parser.add_argument('-v', '--view',
+        action='store_true',
+        default=False,
+        help="open PDF file in default viewer")
+    parser.add_argument('-w', '--watch',
+        action='store_true',
+        default=False,
+        help="recompile when TikZ file or template has changed")
+    parser.add_argument('-x', '--xelatex',
+        action='store_const',
+        const='xelatex',
+        dest='bin',
+        help="use xelatex as compiler")
 
     args = vars(parser.parse_args())
     tikz_files = args.pop('tikz_files')
@@ -267,17 +357,26 @@ def main():
         args['watch'] = True
 
     if len(output) == 1 and output[0][-1] == os.path.sep:
-        d = os.path.abspath(output[0])
+        directory = os.path.abspath(output[0])
         if tikz_files is not sys.stdin:
-            pdf_filenames = map(lambda x: os.path.join(d, os.path.splitext(os.path.basename(x.name))[0]) + '.pdf', tikz_files)
+            pdf_filenames = [
+                os.path.join(
+                    directory,
+                    os.path.splitext(os.path.basename(x.name))[0]) + '.pdf'
+                for x in tikz_files]
         else:
             pdf_filenames = ['out.pdf']
     elif len(output) != len(tikz_files):
-        self.log.error("Error: Number of output files does not match number of input files. Consider specifying a directory with a trailing slash")
-        exit(1)
+        logger = logging.getLogger('tikz2pdf')
+        logger.error(
+            "Error: Number of output files does not match number of input files. "
+            "Consider specifying a directory with a trailing slash")
+        sys.exit(1)
     else:
-        d = os.path.curdir
-        pdf_filenames = map(lambda x: os.path.abspath(os.path.join(d, x)), output)
+        directory = os.path.curdir
+        pdf_filenames = [
+            os.path.abspath(os.path.join(directory, x))
+            for x in output]
 
     log_format = "tikz2pdf: %(message)s"
     logging.basicConfig(format=log_format, level=logging.INFO)
@@ -287,4 +386,4 @@ def main():
 
 
 if __name__ == '__main__':
-    exit(main())
+    sys.exit(main())
